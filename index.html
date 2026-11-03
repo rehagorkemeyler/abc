@@ -49,7 +49,7 @@
 
   .item img {
     width: 853px;
-    height: 1280px;
+    height: auto;
     display: block;
     border-radius: 8px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
@@ -141,9 +141,11 @@
 <script>
   /* Afişler. Üçüncü fotoğrafı eklemek için bu listeye bir satır ekle
      ve görseli assets/ klasörüne koy. */
+  // w/h: görselin piksel boyutları (oran için)
   const ITEMS = [
-    { src: "assets/rapunzel.jpg",  alt: "Rapunzel afişi",  caption: "Rapunzel" },
-    { src: "assets/pinocchio.jpg", alt: "Pinocchio afişi", caption: "Pinocchio" }
+    { src: "assets/rapunzel.jpg",  alt: "Rapunzel afişi",  caption: "Rapunzel",  w: 853, h: 1280 },
+    { src: "assets/pinocchio.jpg", alt: "Pinocchio afişi", caption: "Pinocchio", w: 853, h: 1280 },
+    { src: "assets/poster-map.png", alt: "Poster Map çalışma kağıdı", caption: "Poster Map", w: 1241, h: 1755 }
   ];
 
   const GAP = 80;
@@ -165,7 +167,7 @@
     img.src = item.src;
     img.alt = item.alt;
     img.width = 853;
-    img.height = 1280;
+    img.height = Math.round((853 * item.h) / item.w);
     img.draggable = false;
     const cap = document.createElement("figcaption");
     cap.textContent = item.caption;
