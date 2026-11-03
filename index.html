@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class 6-A Drama Club - Afişler</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #ffffff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #222;
+  }
+
+  /* Boş tuval: tüm içerik bunun içinde sürüklenir / yakınlaştırılır */
+  #stage {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #stage.dragging { cursor: grabbing; }
+
+  #world {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+
+  .row {
+    display: flex;
+    gap: 80px;
+    align-items: flex-start;
+  }
+
+  .item {
+    width: 853px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .item img {
+    width: 853px;
+    height: 1280px;
+    display: block;
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+    pointer-events: none;
+    -webkit-user-drag: none;
+  }
+
+  .item figcaption {
+    margin-top: 24px;
+    font-size: 40px;
+    font-weight: 700;
+    color: #444;
+  }
+
+  /* Alt kontrol çubuğu */
+  #toolbar {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #ffffff;
+    border: 1px solid #d0d0d6;
+    border-radius: 999px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    z-index: 10;
+  }
+  #toolbar button {
+    min-width: 44px;
+    height: 44px;
+    padding: 0 14px;
+    border: 1px solid #d0d0d6;
+    border-radius: 999px;
+    background: #f5f5f7;
+    font-size: 18px;
+    font-weight: 600;
+    color: #222;
+    cursor: pointer;
+  }
+  #toolbar button:hover { background: #eaeaf0; }
+  #toolbar button:focus-visible { outline: 2px solid #5b4bd6; outline-offset: 2px; }
+  #zoomLabel {
+    min-width: 64px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    font-size: 16px;
+    color: #444;
+  }
+
+  #hint {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 0;
+    padding: 6px 14px;
+    font-size: 14px;
+    color: #555;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 8px;
+    z-index: 10;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 600px) {
+    #hint { white-space: normal; width: calc(100% - 32px); text-align: center; }
+  }
+</style>
+</head>
+<body>
+
+<p id="hint">Yakınlaştır: fare tekerleği / iki parmak &nbsp;·&nbsp; Kaydır: sürükle &nbsp;·&nbsp; Sığdır: 0 tuşu veya çift tık</p>
+
+<div id="stage">
+  <div id="world"></div>
+</div>
+
+<div id="toolbar">
+  <button id="zoomOut" type="button" aria-label="Uzaklaştır">&minus;</button>
+  <span id="zoomLabel">100%</span>
+  <button id="zoomIn" type="button" aria-label="Yakınlaştır">+</button>
+  <button id="fit" type="button">Sığdır</button>
+</div>
+
+<script>
+  /* Afişler. Üçüncü fotoğrafı eklemek için bu listeye bir satır ekle
+     ve görseli assets/ klasörüne koy. */
+  const ITEMS = [
+    { src: "assets/rapunzel.jpg",  alt: "Rapunzel afişi",  caption: "Rapunzel" },
+    { src: "assets/pinocchio.jpg", alt: "Pinocchio afişi", caption: "Pinocchio" }
+  ];
+
+  const GAP = 80;
+  const MIN_SCALE = 0.05;
+  const MAX_SCALE = 6;
+
+  const stage = document.getElementById("stage");
+  const world = document.getElementById("world");
+  const zoomLabel = document.getElementById("zoomLabel");
+
+  // Afişleri yan yana oluştur
+  const row = document.createElement("div");
+  row.className = "row";
+  for (const item of ITEMS) {
+    const fig = document.createElement("figure");
+    fig.className = "item";
+    fig.style.margin = "0";
+    const img = document.createElement("img");
+    img.src = item.src;
+    img.alt = item.alt;
+    img.width = 853;
+    img.height = 1280;
+    img.draggable = false;
+    const cap = document.createElement("figcaption");
+    cap.textContent = item.caption;
+    fig.append(img, cap);
+    row.appendChild(fig);
+  }
+  world.appendChild(row);
+
+  // Görünüm durumu: ölçek ve kaydırma (piksel)
+  let scale = 1, tx = 0, ty = 0;
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function apply() {
+    world.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    zoomLabel.textContent = Math.round(scale * 100) + "%";
+  }
+
+  // (sx, sy) ekran noktasını sabit tutarak ölçeği değiştir
+  function zoomAt(sx, sy, factor) {
+    const ns = clamp(scale * factor, MIN_SCALE, MAX_SCALE);
+    const k = ns / scale;
+    tx = sx - (sx - tx) * k;
+    ty = sy - (sy - ty) * k;
+    scale = ns;
+    apply();
+  }
+
+  function centerPoint() {
+    return { x: stage.clientWidth / 2, y: stage.clientHeight / 2 };
+  }
+
+  // Tüm afişleri ekrana sığdır
+  function fit() {
+    const W = row.offsetWidth;
+    const H = row.offsetHeight;
+    const vw = stage.clientWidth;
+    const vh = stage.clientHeight;
+    scale = clamp(Math.min((vw * 0.92) / W, (vh * 0.8) / H), MIN_SCALE, MAX_SCALE);
+    tx = (vw - W * scale) / 2;
+    ty = (vh - H * scale) / 2;
+    apply();
+  }
+
+  // Buton kontrolleri
+  document.getElementById("zoomIn").addEventListener("click", () => {
+    const c = centerPoint(); zoomAt(c.x, c.y, 1.25);
+  });
+  document.getElementById("zoomOut").addEventListener("click", () => {
+    const c = centerPoint(); zoomAt(c.x, c.y, 1 / 1.25);
+  });
+  document.getElementById("fit").addEventListener("click", fit);
+
+  // Klavye: + / - / 0
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "+" || e.key === "=") { const c = centerPoint(); zoomAt(c.x, c.y, 1.25); }
+    else if (e.key === "-" || e.key === "_") { const c = centerPoint(); zoomAt(c.x, c.y, 1 / 1.25); }
+    else if (e.key === "0") fit();
+  });
+
+  // Fare tekerleği (ve trackpad pinch) ile imlecin altına yakınlaştır
+  function rel(e) {
+    const r = stage.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  stage.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const p = rel(e);
+    const sensitivity = e.ctrlKey ? 0.01 : 0.0015;
+    zoomAt(p.x, p.y, Math.exp(-e.deltaY * sensitivity));
+  }, { passive: false });
+
+  // Sürükle (tek işaretçi) ve iki parmakla kıstır-büyüt (dokunmatik)
+  const pointers = new Map();
+  let last = null;
+
+  function gesture() {
+    const pts = [...pointers.values()];
+    if (pts.length === 0) return null;
+    const mx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const my = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    let d = 0;
+    if (pts.length >= 2) {
+      d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    }
+    return { mx, my, d };
+  }
+
+  stage.addEventListener("pointerdown", (e) => {
+    stage.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, rel(e));
+    stage.classList.add("dragging");
+    last = gesture();
+  });
+
+  stage.addEventListener("pointermove", (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, rel(e));
+    const cur = gesture();
+    if (last) {
+      tx += cur.mx - last.mx;
+      ty += cur.my - last.my;
+      if (last.d > 0 && cur.d > 0) {
+        zoomAt(cur.mx, cur.my, cur.d / last.d);
+      } else {
+        apply();
+      }
+    }
+    last = cur;
+  });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    if (pointers.size === 0) stage.classList.remove("dragging");
+    last = gesture();
+  }
+  stage.addEventListener("pointerup", endPointer);
+  stage.addEventListener("pointercancel", endPointer);
+
+  // Çift tık: sığdır
+  stage.addEventListener("dblclick", fit);
+
+  window.addEventListener("resize", fit);
+
+  // İlk açılışta sığdır
+  fit();
+</script>
+</body>
+</html>
